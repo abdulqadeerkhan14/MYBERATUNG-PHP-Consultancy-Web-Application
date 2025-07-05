@@ -1,0 +1,611 @@
+<?php
+define('SECURE_ACCESS', true);
+require_once '../includes/config.php';
+require_once '../includes/db.php';
+
+session_start();
+
+// Check if user is logged in
+if (!isset($_SESSION['admin_id'])) {
+    header('Location: login.php');
+    exit();
+}
+
+$db = Database::getInstance();
+$message = '';
+$error = '';
+
+// Handle form submissions
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (isset($_POST['action'])) {
+        switch ($_POST['action']) {
+            case 'add':
+                $title = $_POST['title'] ?? '';
+                $content = $_POST['content'] ?? '';
+                $status = $_POST['status'] ?? 'draft';
+                
+                if (empty($title) || empty($content)) {
+                    $error = 'Title and content are required';
+                } else {
+                    $db->execute(
+                        "INSERT INTO blog_posts (title, content, author_id, status) VALUES (?, ?, ?, ?)",
+                        [$title, $content, $_SESSION['admin_id'], $status]
+                    );
+                    $message = 'Blog post added successfully';
+                }
+                break;
+                
+            case 'edit':
+                $id = $_POST['id'] ?? '';
+                $title = $_POST['title'] ?? '';
+                $content = $_POST['content'] ?? '';
+                $status = $_POST['status'] ?? 'draft';
+                
+                if (empty($id) || empty($title) || empty($content)) {
+                    $error = 'ID, title and content are required';
+                } else {
+                    $db->execute(
+                        "UPDATE blog_posts SET title = ?, content = ?, status = ? WHERE id = ?",
+                        [$title, $content, $status, $id]
+                    );
+                    $message = 'Blog post updated successfully';
+                }
+                break;
+                
+            case 'delete':
+                $id = $_POST['id'] ?? '';
+                if (!empty($id)) {
+                    $db->execute("DELETE FROM blog_posts WHERE id = ?", [$id]);
+                    $message = 'Blog post deleted successfully';
+                }
+                break;
+                
+            case 'toggle_status':
+                $id = $_POST['id'] ?? '';
+                $current_status = $_POST['current_status'] ?? 'draft';
+                $new_status = $current_status === 'published' ? 'draft' : 'published';
+                
+                if (!empty($id)) {
+                    $db->execute(
+                        "UPDATE blog_posts SET status = ? WHERE id = ?",
+                        [$new_status, $id]
+                    );
+                    $message = 'Blog post status updated';
+                }
+                break;
+        }
+    }
+}
+
+// Get all blog posts
+$posts = $db->fetchAll(
+    "SELECT p.*, u.username as author_name 
+     FROM blog_posts p 
+     LEFT JOIN users u ON p.author_id = u.id 
+     ORDER BY p.created_at DESC"
+);
+
+// Get post for editing
+$edit_post = null;
+if (isset($_GET['edit']) && !empty($_GET['edit'])) {
+    $edit_post = $db->fetch("SELECT * FROM blog_posts WHERE id = ?", [$_GET['edit']]);
+}
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blog Management - MYBERATUNG</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #06A3DA;
+            --secondary: #F57E57;
+            --dark: #091E3B;
+            --light: #F8F9FA;
+            --white: #FFFFFF;
+            --gray: #6C757D;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Heebo', sans-serif;
+            line-height: 1.6;
+            color: var(--dark);
+            background-color: var(--light);
+        }
+        .sidebar {
+            position: fixed;
+            left: 0;
+            top: 0;
+            height: 100vh;
+            width: 250px;
+            background: linear-gradient(135deg, var(--primary) 0%, #0DCAF0 100%);
+            color: white;
+            z-index: 1000;
+            box-shadow: 2px 0 20px rgba(0, 0, 0, 0.1);
+        }
+        .sidebar-header {
+            padding: 20px;
+            text-align: center;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .sidebar-header h4 {
+            color: var(--white);
+            font-weight: 700;
+            margin: 0;
+        }
+        .nav-link {
+            color: rgba(255,255,255,0.9);
+            padding: 15px 25px;
+            display: flex;
+            align-items: center;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            border-left: 3px solid transparent;
+            font-weight: 500;
+        }
+        .nav-link:hover, .nav-link.active {
+            color: white;
+            background-color: rgba(255,255,255,0.15);
+            border-left-color: var(--white);
+            text-decoration: none;
+            transform: translateX(5px);
+        }
+        .nav-link i {
+            margin-right: 12px;
+            width: 20px;
+            font-size: 1.1rem;
+        }
+        .main-content {
+            margin-left: 250px;
+            padding: 30px;
+            min-height: 100vh;
+        }
+        .top-header {
+            background: var(--white);
+            padding: 20px 30px;
+            border-radius: 15px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.08);
+            margin-bottom: 30px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .top-header h1 {
+            color: var(--primary);
+            font-weight: 700;
+            margin: 0;
+        }
+        .user-avatar {
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary), #0DCAF0);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 1.2rem;
+        }
+        .dashboard-card {
+            background: var(--white);
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.08);
+            margin-bottom: 25px;
+            transition: all 0.3s ease;
+            border: none;
+        }
+
+        .dashboard-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.12);
+        }
+
+        .dashboard-card h4 {
+            color: var(--primary);
+            font-weight: 600;
+            margin-bottom: 1rem;
+        }
+        .post-card {
+            transition: all 0.3s ease;
+            border-radius: 15px;
+            border: none;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.08);
+        }
+        .post-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.12);
+        }
+        .status-badge {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            padding: 0.5rem 1rem;
+            border-radius: 50px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        .status-published {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status-draft {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .quick-link-card {
+            transition: all 0.3s ease;
+            border-radius: 15px;
+            border: none;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.08);
+        }
+        .quick-link-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.12);
+        }
+
+        .btn-primary {
+            background: var(--primary) !important;
+            border: 2px solid var(--primary) !important;
+            color: var(--white) !important;
+            font-weight: 600;
+            padding: 0.75rem 2rem;
+            border-radius: 50px;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary:hover {
+            background: transparent !important;
+            color: var(--primary) !important;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(6, 163, 218, 0.3);
+        }
+
+        .btn-outline-primary {
+            border: 2px solid var(--primary) !important;
+            color: var(--primary) !important;
+            background: transparent !important;
+            font-weight: 600;
+            padding: 0.75rem 2rem;
+            border-radius: 50px;
+            transition: all 0.3s ease;
+        }
+
+        .btn-outline-primary:hover {
+            background: var(--primary) !important;
+            color: var(--white) !important;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(6, 163, 218, 0.3);
+        }
+
+        .form-control {
+            border-radius: 10px;
+            border: 2px solid #e9ecef;
+            padding: 0.75rem 1rem;
+            transition: all 0.3s ease;
+        }
+
+        .form-control:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 0.2rem rgba(6, 163, 218, 0.25);
+        }
+
+        .alert {
+            border-radius: 10px;
+            border: none;
+            padding: 1rem 1.5rem;
+        }
+
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .alert-danger {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .card {
+            border-radius: 15px;
+            border: none;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.08);
+            transition: all 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.12);
+        }
+
+        .card-header {
+            background: var(--primary);
+            color: var(--white);
+            border-radius: 15px 15px 0 0 !important;
+            border: none;
+            font-weight: 600;
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 100%;
+                height: auto;
+                position: relative;
+            }
+            
+            .main-content {
+                margin-left: 0;
+                padding: 15px;
+            }
+            
+            .top-header {
+                flex-direction: column;
+                text-align: center;
+                gap: 15px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Sidebar -->
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <h4><i class="fas fa-user-shield"></i> MYBERATUNG</h4>
+        </div>
+        <nav class="mt-4">
+            <a href="dashboard.php" class="nav-link">
+                <i class="fas fa-tachometer-alt"></i> Dashboard
+            </a>
+            <a href="services-management.php" class="nav-link">
+                <i class="fas fa-briefcase"></i> Manage Services
+            </a>
+            <a href="blog-management.php" class="nav-link active">
+                <i class="fas fa-newspaper"></i> Manage Blog
+            </a>
+            <a href="user-management.php" class="nav-link">
+                <i class="fas fa-users"></i> Manage Users
+            </a>
+            <a href="manage-applications.php" class="nav-link">
+                <i class="fas fa-passport"></i> Applicants
+            </a>
+            <a href="settings.php" class="nav-link">
+                <i class="fas fa-cog"></i> Settings
+            </a>
+            <a href="../index.php" class="nav-link" target="_blank">
+                <i class="fas fa-external-link-alt"></i> View Website
+            </a>
+            <a href="logout.php" class="nav-link mt-5">
+                <i class="fas fa-sign-out-alt"></i> Logout
+            </a>
+        </nav>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <!-- Top Header -->
+        <div class="top-header">
+            <h1>Blog Management</h1>
+            <div class="d-flex align-items-center">
+                <div class="mr-3 text-right">
+                    <p class="mb-0 font-weight-bold"><?php echo htmlspecialchars($_SESSION['admin_username']); ?></p>
+                    <small class="text-muted">Administrator</small>
+                </div>
+                <div class="user-avatar">
+                    <?php echo strtoupper(substr($_SESSION['admin_username'], 0, 1)); ?>
+                </div>
+            </div>
+        </div>
+        <!-- Page Content -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h3>All Blog Posts</h3>
+            <button class="btn btn-primary" data-toggle="modal" data-target="#addPostModal">
+                <i class="fas fa-plus"></i> Add New Post
+            </button>
+        </div>
+
+        <?php if ($message): ?>
+            <div class="alert alert-success alert-dismissible fade show">
+                <?php echo htmlspecialchars($message); ?>
+                <button type="button" class="close" data-dismiss="alert">
+                    <span>&times;</span>
+                </button>
+            </div>
+        <?php endif; ?>
+
+        <?php if ($error): ?>
+            <div class="alert alert-danger alert-dismissible fade show">
+                <?php echo htmlspecialchars($error); ?>
+                <button type="button" class="close" data-dismiss="alert">
+                    <span>&times;</span>
+                </button>
+            </div>
+        <?php endif; ?>
+
+        <!-- Blog Posts Grid -->
+        <div class="row">
+            <?php foreach ($posts as $post): ?>
+            <div class="col-md-6 col-lg-4 mb-4">
+                <div class="card post-card h-100">
+                    <div class="status-badge <?php echo $post['status'] === 'published' ? 'status-published' : 'status-draft'; ?>">
+                        <?php echo ucfirst($post['status']); ?>
+                    </div>
+                    
+                    <div class="card-body">
+                        <h5 class="card-title"><?php echo htmlspecialchars($post['title']); ?></h5>
+                        <p class="card-text"><?php echo htmlspecialchars(substr(strip_tags($post['content']), 0, 150)) . '...'; ?></p>
+                        
+                        <div class="text-muted mb-3">
+                            <small>
+                                <i class="fas fa-user"></i> <?php echo htmlspecialchars($post['author_name']); ?><br>
+                                <i class="fas fa-calendar"></i> <?php echo date('M d, Y', strtotime($post['created_at'])); ?>
+                            </small>
+                        </div>
+                        
+                        <div class="mt-auto">
+                            <div class="btn-group w-100" role="group">
+                                <a href="?edit=<?php echo $post['id']; ?>" class="btn btn-outline-primary btn-sm">
+                                    <i class="fas fa-edit"></i> Edit
+                                </a>
+                                <button type="button" class="btn btn-outline-warning btn-sm" onclick="toggleStatus(<?php echo $post['id']; ?>, '<?php echo $post['status']; ?>')">
+                                    <i class="fas fa-toggle-on"></i> <?php echo $post['status'] === 'published' ? 'Unpublish' : 'Publish'; ?>
+                                </button>
+                                <button type="button" class="btn btn-outline-danger btn-sm" onclick="deletePost(<?php echo $post['id']; ?>, '<?php echo htmlspecialchars($post['title']); ?>')">
+                                    <i class="fas fa-trash"></i> Delete
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <?php endforeach; ?>
+        </div>
+
+        <?php if (empty($posts)): ?>
+            <div class="text-center py-5">
+                <i class="fas fa-newspaper fa-3x text-muted mb-3"></i>
+                <h4>No Blog Posts Found</h4>
+                <p class="text-muted">Add your first visa update or blog post to get started.</p>
+                <button class="btn btn-primary" data-toggle="modal" data-target="#addPostModal">
+                    <i class="fas fa-plus"></i> Add First Post
+                </button>
+            </div>
+        <?php endif; ?>
+    </div>
+
+    <!-- Add Post Modal -->
+    <div class="modal fade" id="addPostModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Add New Blog Post</h5>
+                    <button type="button" class="close" data-dismiss="modal">
+                        <span>&times;</span>
+                    </button>
+                </div>
+                <form method="POST">
+                    <div class="modal-body">
+                        <input type="hidden" name="action" value="add">
+                        
+                        <div class="form-group">
+                            <label for="title">Post Title *</label>
+                            <input type="text" class="form-control" id="title" name="title" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="content">Content *</label>
+                            <textarea class="form-control" id="content" name="content" rows="8" required></textarea>
+                            <small class="form-text text-muted">You can use HTML tags for formatting.</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="status">Status</label>
+                            <select class="form-control" id="status" name="status">
+                                <option value="draft">Draft</option>
+                                <option value="published">Published</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Add Post</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Post Modal -->
+    <?php if ($edit_post): ?>
+    <div class="modal fade show" id="editPostModal" tabindex="-1" style="display: block;">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Blog Post</h5>
+                    <a href="blog-management.php" class="close">
+                        <span>&times;</span>
+                    </a>
+                </div>
+                <form method="POST">
+                    <div class="modal-body">
+                        <input type="hidden" name="action" value="edit">
+                        <input type="hidden" name="id" value="<?php echo $edit_post['id']; ?>">
+                        
+                        <div class="form-group">
+                            <label for="edit_title">Post Title *</label>
+                            <input type="text" class="form-control" id="edit_title" name="title" value="<?php echo htmlspecialchars($edit_post['title']); ?>" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="edit_content">Content *</label>
+                            <textarea class="form-control" id="edit_content" name="content" rows="8" required><?php echo htmlspecialchars($edit_post['content']); ?></textarea>
+                            <small class="form-text text-muted">You can use HTML tags for formatting.</small>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="edit_status">Status</label>
+                            <select class="form-control" id="edit_status" name="status">
+                                <option value="draft" <?php echo $edit_post['status'] === 'draft' ? 'selected' : ''; ?>>Draft</option>
+                                <option value="published" <?php echo $edit_post['status'] === 'published' ? 'selected' : ''; ?>>Published</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <a href="blog-management.php" class="btn btn-secondary">Cancel</a>
+                        <button type="submit" class="btn btn-primary">Update Post</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="modal-backdrop fade show"></div>
+    <?php endif; ?>
+
+    <!-- Delete Confirmation Form -->
+    <form id="deleteForm" method="POST" style="display: none;">
+        <input type="hidden" name="action" value="delete">
+        <input type="hidden" name="id" id="deleteId">
+    </form>
+
+    <!-- Toggle Status Form -->
+    <form id="toggleForm" method="POST" style="display: none;">
+        <input type="hidden" name="action" value="toggle_status">
+        <input type="hidden" name="id" id="toggleId">
+        <input type="hidden" name="current_status" id="toggleStatus">
+    </form>
+
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        function deletePost(id, title) {
+            if (confirm('Are you sure you want to delete "' + title + '"?')) {
+                document.getElementById('deleteId').value = id;
+                document.getElementById('deleteForm').submit();
+            }
+        }
+
+        function toggleStatus(id, currentStatus) {
+            document.getElementById('toggleId').value = id;
+            document.getElementById('toggleStatus').value = currentStatus;
+            document.getElementById('toggleForm').submit();
+        }
+
+        // Auto-close alerts after 5 seconds
+        setTimeout(function() {
+            $('.alert').fadeOut();
+        }, 5000);
+    </script>
+</body>
+</html> 
