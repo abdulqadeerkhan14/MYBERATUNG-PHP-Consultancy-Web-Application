@@ -134,7 +134,6 @@ A comprehensive and modern visa consultancy website with client and admin interf
 ### Default Admin Credentials
 - **Username**: admin
 - **Password**: admin123
-- **Email**: admin@visaconsultancy.com
 
 ⚠️ **Important**: Change the default admin password after first login!
 
