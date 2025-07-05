@@ -212,10 +212,6 @@ A comprehensive and modern visa consultancy website with client and admin interf
 ## 📝 License
 This project is licensed under the MIT License.
 
-## 🤝 Support
-For technical support or questions about the visa consultancy services, please contact:
-- **Email**: info@visaconsultancy.com
-- **Phone**: +1-555-123-4567
 
 ## 🔄 Version History
 - **v1.0**: Initial release with core functionality
